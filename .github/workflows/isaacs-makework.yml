@@ -6,9 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+      - master
 jobs:
   makework:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v2
         with:

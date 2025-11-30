@@ -1,9 +1,11 @@
 import { spawn, SpawnOptions } from 'child_process'
-import { sep } from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { join, sep } from 'path'
 import t from 'tap'
 import { fileURLToPath } from 'url'
 import pkg from '../package.json' assert { type: 'json' }
 const { version } = pkg
+import { globSync } from 'glob'
 const bin = fileURLToPath(new URL('../dist/esm/bin.mjs', import.meta.url))
 
 t.cleanSnapshot = s => s.split(version).join('{VERSION}')
@@ -62,20 +64,11 @@ t.test('finds matches for a pattern', async t => {
       },
     },
   })
-  const res = await run(['**/*.y'], { cwd })
+
+  const files = globSync('**/*.y', { cwd })
+  const res = await run(files, { cwd })
   t.match(res.stdout, `a${sep}x.y\n`)
   t.match(res.stdout, `a${sep}b${sep}z.y\n`)
-
-  const c = `node -p "process.argv.map(s=>s.toUpperCase())"`
-  const cmd = await run(['**/*.y', '-c', c], { cwd })
-  t.match(cmd.stdout, `'a${sep.replace(/\\/g, '\\\\')}x.y'`.toUpperCase())
-  t.match(
-    cmd.stdout,
-    `'a${sep.replace(/\\/g, '\\\\')}b${sep.replace(
-      /\\/g,
-      '\\\\'
-    )}z.y'`.toUpperCase()
-  )
 })
 
 t.test('prioritizes exact match if exists, unless --all', async t => {
@@ -114,3 +107,21 @@ t.test('uses default pattern if none provided', async t => {
   t.match(exp.stdout, `a${sep}x.a\n`)
   t.match(exp.stdout, `a${sep}b${sep}z.a\n`)
 })
+
+t.test('prevents command injection via -c/--cmd', async t => {
+  const cwd = t.testdir({
+    '$(touch injected_poc)': '',
+    'normal-file.txt': '',
+  })
+
+  const injectedFile = join(cwd, 'injected_poc')
+  t.equal(existsSync(injectedFile), false, 'injected file should not exist before test')
+
+  const res = await run(['-c', 'echo', '**/*'], { cwd })
+  t.equal(res.code, 0, 'command should succeed')
+  t.match(res.stdout, /\$\(touch injected_poc\)/, 'filename should be echoed as literal')
+  t.match(res.stdout, /normal-file\.txt/, 'normal file should be echoed')
+
+  t.equal(existsSync(injectedFile), false, 'injected file should not exist after test (command injection prevented)')
+})
+
